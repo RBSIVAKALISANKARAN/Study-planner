@@ -1,11 +1,15 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Brain } from 'lucide-react';
+import ThemeToggle from '../components/ThemeToggle';
+import { Brain, CheckCircle } from 'lucide-react';
 
 export default function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const justRegistered = searchParams.get('registered') === '1';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -26,6 +30,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+      {/* Theme toggle — top-right corner */}
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-md">
         <div className="flex items-center justify-center gap-2 mb-8">
           <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center">
@@ -36,6 +45,15 @@ export default function Login() {
         <div className="card p-8">
           <h1 className="text-xl font-semibold mb-1">Welcome back</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Sign in to continue your mastery journey</p>
+
+          {/* Success banner shown after signup */}
+          {justRegistered && (
+            <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-sm">
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              Account created! Sign in to get started.
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="label">Email</label>

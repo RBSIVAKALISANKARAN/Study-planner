@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import ThemeToggle from './ThemeToggle';
 import {
   LayoutDashboard,
   Timer,
@@ -30,23 +31,8 @@ const navItems = [
 
 export default function Layout() {
   const { profile, signOut } = useAuth();
+  const { dark, setDark } = useTheme();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [dark, setDark] = useState(() => {
-    const stored = localStorage.getItem('mm-theme');
-    if (stored) return stored === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
-  useEffect(() => {
-    if (dark) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('mm-theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('mm-theme', 'light');
-    }
-  }, [dark]);
 
   async function handleSignOut() {
     await signOut();
@@ -106,9 +92,7 @@ export default function Layout() {
           </div>
           <span className="font-bold">MasteryMap</span>
         </div>
-        <button onClick={() => setDark(!dark)} className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
-          {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-        </button>
+        <ThemeToggle />
       </header>
 
       {/* Main content */}

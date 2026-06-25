@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import ThemeToggle from '../components/ThemeToggle';
 import { Brain } from 'lucide-react';
 
 export default function Signup() {
-  const { signUp } = useAuth();
+  const { signUp, signOut } = useAuth();
   const navigate = useNavigate();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -21,12 +22,21 @@ export default function Signup() {
     if (error) {
       setError(error.message);
     } else if (data.user) {
-      navigate('/dashboard');
+      // Sign out immediately so the new user must log in manually.
+      // This prevents Supabase's auto-session-on-signup behaviour from
+      // bypassing the login page.
+      await signOut();
+      navigate('/login?registered=1');
     }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+      {/* Theme toggle — top-right corner */}
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-md">
         <div className="flex items-center justify-center gap-2 mb-8">
           <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center">
