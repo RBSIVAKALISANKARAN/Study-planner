@@ -15,10 +15,17 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [quickLogOpen, setQuickLogOpen] = useState(false);
 
-  const loadData = useCallback(async () => {
-    if (!user) return;
+ const loadData = useCallback(async () => {
+  // If user is not available, stop loading and exit
+  if (!user) {
+    setLoading(false);
+    return;
+  }
+
+  try {
     const today = todayLocalISO();
 
+    // Fetch review queue (due topics)
     const { data: queue } = await supabase
       .from('review_states')
       .select('topic_id, next_review_date, topics(id, name, current_mastery, subject_id, subjects(id, name, color))')
@@ -29,6 +36,7 @@ export default function Dashboard() {
     const filtered = (queue || []).filter((r) => r.topics?.subjects);
     setReviewQueue(filtered);
 
+    // Fetch study events for the current week
     const ws = startOfWeek().toISOString();
     const we = endOfWeek().toISOString();
     const { data: events } = await supabase
@@ -38,6 +46,7 @@ export default function Dashboard() {
       .gte('created_at', ws)
       .lte('created_at', we);
 
+    // Calculate weekly summary
     const totalMin = (events || []).reduce((s, e) => s + (e.duration_minutes || 0), 0);
     const subjMap = {};
     (events || []).forEach((e) => {
@@ -51,8 +60,14 @@ export default function Dashboard() {
       sessions: (events || []).length,
       topSubject: topSubject ? topSubject[0] : null,
     });
+  } catch (err) {
+    console.error('Dashboard data loading error:', err);
+    // You could also show a toast/notification here if desired
+  } finally {
+    // Always set loading to false, whether success or error
     setLoading(false);
-  }, [user]);
+  }
+}, [user]);
 
   useEffect(() => {
     loadData();

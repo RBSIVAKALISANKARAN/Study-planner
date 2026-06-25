@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabase.js';
 import { submitStudyEvent } from '../lib/study.js';
 import ConfidenceCards from '../components/ConfidenceCards';
-import { Timer, Coffee, Zap, Play, Square, ArrowRight, Check } from 'lucide-react';
+import { Timer, Coffee, Zap, Square, ArrowRight, Check, Settings2 } from 'lucide-react';
 
 export default function Session() {
   const { user, refreshProfile } = useAuth();
@@ -15,14 +15,23 @@ export default function Session() {
   const [topics, setTopics] = useState([]);
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [selectedTopicData, setSelectedTopicData] = useState(null);
   const [step, setStep] = useState(1);
   const [eventType, setEventType] = useState('');
   const [phase, setPhase] = useState('setup');
   const [confidence, setConfidence] = useState(0);
   const [focus, setFocus] = useState(3);
+  const [velocity, setVelocity] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+
+  // Custom Pomodoro durations
+  const [showPomodoroSettings, setShowPomodoroSettings] = useState(false);
+  const [workMinutes, setWorkMinutes] = useState(25);
+  const [breakMinutes, setBreakMinutes] = useState(5);
+  const [pendingWork, setPendingWork] = useState(25);
+  const [pendingBreak, setPendingBreak] = useState(5);
 
   const preselectTopic = searchParams.get('topic');
 
@@ -40,13 +49,13 @@ export default function Session() {
     if (selectedSubject) loadTopics(selectedSubject);
   }, [selectedSubject, loadTopics]);
 
-  // Pre-select topic from query param
   useEffect(() => {
     if (preselectTopic && subjects.length > 0) {
       supabase.from('topics').select('*, subjects(id)').eq('id', preselectTopic).single().then(({ data }) => {
         if (data) {
           setSelectedSubject(data.subjects.id);
           setSelectedTopic(data.id);
+          setSelectedTopicData(data);
           setStep(2);
         }
       });
@@ -56,11 +65,13 @@ export default function Session() {
   function pickSubject(id) {
     setSelectedSubject(id);
     setSelectedTopic('');
+    setSelectedTopicData(null);
     setTopics([]);
   }
 
-  function pickTopic(id) {
-    setSelectedTopic(id);
+  function pickTopic(t) {
+    setSelectedTopic(t.id);
+    setSelectedTopicData(t);
     setStep(2);
   }
 
@@ -71,6 +82,13 @@ export default function Session() {
     } else {
       setPhase('running');
     }
+  }
+
+  function applyPomodoroSettings() {
+    setWorkMinutes(pendingWork);
+    setBreakMinutes(pendingBreak);
+    setPomodoroSeconds(pendingWork * 60);
+    setShowPomodoroSettings(false);
   }
 
   async function handleSubmit() {
@@ -104,6 +122,7 @@ export default function Session() {
         confidenceRating: confidence,
         focusRating: focus,
         pomodoroCycles: cycles,
+        velocityUnits: velocity ? Number(velocity) : null,
         notes: notes || null,
       });
       await refreshProfile();
@@ -122,8 +141,8 @@ export default function Session() {
   const timerRef = useRef(null);
 
   // Pomodoro state
-  const [pomodoroPhase, setPomodoroPhase] = useState('work'); // work | break
-  const [pomodoroSeconds, setPomodoroSeconds] = useState(25 * 60);
+  const [pomodoroPhase, setPomodoroPhase] = useState('work');
+  const [pomodoroSeconds, setPomodoroSeconds] = useState(workMinutes * 60);
   const [pomodoroCycles, setPomodoroCycles] = useState(0);
   const [pomodoroWorkMinutes, setPomodoroWorkMinutes] = useState(0);
   const pomoRef = useRef(null);
@@ -145,12 +164,12 @@ export default function Session() {
           if (s <= 1) {
             if (pomodoroPhase === 'work') {
               setPomodoroCycles((c) => c + 1);
-              setPomodoroWorkMinutes((m) => m + 25);
+              setPomodoroWorkMinutes((m) => m + workMinutes);
               setPomodoroPhase('break');
-              return 5 * 60;
+              return breakMinutes * 60;
             } else {
               setPomodoroPhase('work');
-              return 25 * 60;
+              return workMinutes * 60;
             }
           }
           return s - 1;
@@ -158,7 +177,7 @@ export default function Session() {
       }, 1000);
       return () => clearInterval(pomoRef.current);
     }
-  }, [phase, eventType, pomodoroPhase]);
+  }, [phase, eventType, pomodoroPhase, workMinutes, breakMinutes]);
 
   function stopTimer() {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -176,16 +195,18 @@ export default function Session() {
     setStep(1);
     setSelectedSubject('');
     setSelectedTopic('');
+    setSelectedTopicData(null);
     setEventType('');
     setPhase('setup');
     setConfidence(0);
     setFocus(3);
+    setVelocity('');
     setNotes('');
     setDone(false);
     setElapsed(0);
     elapsedRef.current = 0;
     setPomodoroPhase('work');
-    setPomodoroSeconds(25 * 60);
+    setPomodoroSeconds(workMinutes * 60);
     setPomodoroCycles(0);
     setPomodoroWorkMinutes(0);
     setSearchParams({});
@@ -211,7 +232,6 @@ export default function Session() {
     <div className="max-w-2xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">Study Session</h1>
 
-      {/* Step indicator */}
       <div className="flex items-center gap-2 text-sm">
         <span className={step >= 1 ? 'text-brand-600 dark:text-brand-400 font-medium' : 'text-gray-400'}>1. Topic</span>
         <ArrowRight className="w-3 h-3 text-gray-400" />
@@ -248,11 +268,16 @@ export default function Session() {
                 {topics.map((t) => (
                   <button
                     key={t.id}
-                    onClick={() => pickTopic(t.id)}
-                    className="flex items-center justify-between p-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-brand-400 transition-all text-sm"
+                    onClick={() => pickTopic(t)}
+                    className="flex items-center justify-between p-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-brand-400 transition-all text-sm text-left"
                   >
-                    <span className="font-medium truncate">{t.name}</span>
-                    <span className="text-xs text-gray-400">{t.current_mastery}%</span>
+                    <div className="min-w-0">
+                      <span className="font-medium block truncate">{t.name}</span>
+                      {t.description && (
+                        <span className="text-xs text-gray-400 truncate block">{t.description}</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{t.current_mastery}%</span>
                   </button>
                 ))}
               </div>
@@ -269,17 +294,37 @@ export default function Session() {
             <h2 className="font-semibold">Choose your mode</h2>
             <button onClick={() => setStep(1)} className="text-sm text-gray-500 hover:text-gray-700">Back</button>
           </div>
+
+          {/* Show topic notes if present */}
+          {selectedTopicData?.description && (
+            <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+              <p className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">Topic notes</p>
+              <p className="text-sm text-blue-800 dark:text-blue-200">{selectedTopicData.description}</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button onClick={() => pickEventType('timer')} className="card p-5 text-center hover:border-brand-400 transition-all">
               <Timer className="w-8 h-8 mx-auto mb-2 text-brand-500" />
               <p className="font-medium">Timer</p>
               <p className="text-xs text-gray-400 mt-1">Live stopwatch</p>
             </button>
-            <button onClick={() => pickEventType('pomodoro')} className="card p-5 text-center hover:border-brand-400 transition-all">
-              <Coffee className="w-8 h-8 mx-auto mb-2 text-orange-500" />
-              <p className="font-medium">Pomodoro</p>
-              <p className="text-xs text-gray-400 mt-1">25 min work / 5 min break</p>
-            </button>
+
+            <div className="relative">
+              <button onClick={() => pickEventType('pomodoro')} className="card p-5 text-center hover:border-brand-400 transition-all w-full">
+                <Coffee className="w-8 h-8 mx-auto mb-2 text-orange-500" />
+                <p className="font-medium">Pomodoro</p>
+                <p className="text-xs text-gray-400 mt-1">{workMinutes} min work / {breakMinutes} min break</p>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setPendingWork(workMinutes); setPendingBreak(breakMinutes); setShowPomodoroSettings(true); }}
+                className="absolute top-2 right-2 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600"
+                title="Customize durations"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <button onClick={() => pickEventType('quick')} className="card p-5 text-center hover:border-brand-400 transition-all">
               <Zap className="w-8 h-8 mx-auto mb-2 text-amber-500" />
               <p className="font-medium">Quick</p>
@@ -289,7 +334,36 @@ export default function Session() {
         </div>
       )}
 
-      {/* Running phase: timer or pomodoro */}
+      {/* Pomodoro settings modal */}
+      {showPomodoroSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowPomodoroSettings(false)}>
+          <div className="card p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-semibold text-lg mb-4">Pomodoro Settings</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Work duration (minutes)</label>
+                <input
+                  type="number" min={1} max={120} className="input"
+                  value={pendingWork} onChange={(e) => setPendingWork(Math.max(1, parseInt(e.target.value) || 1))}
+                />
+              </div>
+              <div>
+                <label className="label">Break duration (minutes)</label>
+                <input
+                  type="number" min={1} max={60} className="input"
+                  value={pendingBreak} onChange={(e) => setPendingBreak(Math.max(1, parseInt(e.target.value) || 1))}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowPomodoroSettings(false)} className="btn-secondary flex-1">Cancel</button>
+                <button onClick={applyPomodoroSettings} className="btn-primary flex-1">Apply</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Running phase: timer */}
       {phase === 'running' && eventType === 'timer' && (
         <div className="card p-8 text-center">
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Timer running</p>
@@ -300,12 +374,16 @@ export default function Session() {
         </div>
       )}
 
+      {/* Running phase: pomodoro */}
       {phase === 'running' && eventType === 'pomodoro' && (
         <div className="card p-8 text-center">
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
             {pomodoroPhase === 'work' ? 'Focus time' : 'Break time'} · Cycles: {pomodoroCycles}
           </p>
-          <p className="text-5xl font-mono font-bold mb-6">{fmtTime(pomodoroSeconds)}</p>
+          <p className="text-5xl font-mono font-bold mb-2">{fmtTime(pomodoroSeconds)}</p>
+          <p className="text-xs text-gray-400 mb-6">
+            {pomodoroPhase === 'work' ? `${workMinutes} min work` : `${breakMinutes} min break`}
+          </p>
           <button onClick={stopTimer} className="btn-danger mx-auto">
             <Square className="w-4 h-4" /> Finish
           </button>
@@ -323,6 +401,14 @@ export default function Session() {
           <div>
             <label className="label">Focus — how focused were you? ({focus}/5)</label>
             <input type="range" min={1} max={5} value={focus} onChange={(e) => setFocus(Number(e.target.value))} />
+          </div>
+          <div>
+            <label className="label">Velocity — How many pages, problems, or concepts did you cover?</label>
+            <input
+              type="number" min={1} className="input"
+              value={velocity} onChange={(e) => setVelocity(e.target.value)}
+              placeholder="e.g. 5 pages or 3 problems"
+            />
           </div>
           <div>
             <label className="label">Notes (optional)</label>

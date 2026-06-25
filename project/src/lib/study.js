@@ -12,6 +12,7 @@ export async function submitStudyEvent({
   confidenceRating,
   focusRating,
   pomodoroCycles,
+  velocityUnits,
   notes,
 }) {
   const { data: event, error: eventError } = await supabase
@@ -26,6 +27,7 @@ export async function submitStudyEvent({
       confidence_rating: confidenceRating,
       focus_rating: focusRating,
       pomodoro_cycles: pomodoroCycles,
+      velocity_units: velocityUnits ?? null,
       notes,
     })
     .select()

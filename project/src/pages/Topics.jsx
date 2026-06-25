@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabase.js';
 import { MasteryBadge } from '../lib/mastery.jsx';
 import { formatLocalDate } from '../lib/dates.js';
-import { Plus, ChevronDown, ChevronRight, Trash2, X } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Trash2, X, FileText } from 'lucide-react';
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
 
@@ -16,6 +16,7 @@ export default function Topics() {
   const [showAddSubject, setShowAddSubject] = useState(false);
   const [addTopicFor, setAddTopicFor] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editingTopic, setEditingTopic] = useState(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -47,9 +48,15 @@ export default function Topics() {
     load();
   }
 
-  async function addTopic(subjectId, name) {
-    await supabase.from('topics').insert({ user_id: user.id, subject_id: subjectId, name });
+  async function addTopic(subjectId, name, description) {
+    await supabase.from('topics').insert({ user_id: user.id, subject_id: subjectId, name, description: description || null });
     setAddTopicFor(null);
+    load();
+  }
+
+  async function updateTopicDescription(topicId, description) {
+    await supabase.from('topics').update({ description: description || null }).eq('id', topicId);
+    setEditingTopic(null);
     load();
   }
 
@@ -108,16 +115,28 @@ export default function Topics() {
                     <p className="text-sm text-gray-400 py-2">No topics yet.</p>
                   ) : (
                     (topics[s.id] || []).map((t) => (
-                      <div key={t.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{t.name}</p>
-                          <p className="text-xs text-gray-400">Next review: {t.review_states?.[0]?.next_review_date ? formatLocalDate(t.review_states[0].next_review_date) : 'Not set'}</p>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <MasteryBadge score={t.current_mastery} />
-                          <button onClick={() => setDeleteTarget({ type: 'topic', id: t.id, name: t.name })} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                      <div key={t.id} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium truncate">{t.name}</p>
+                            <p className="text-xs text-gray-400">Next review: {t.review_states?.[0]?.next_review_date ? formatLocalDate(t.review_states[0].next_review_date) : 'Not set'}</p>
+                            {t.description && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">{t.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                            <MasteryBadge score={t.current_mastery} />
+                            <button
+                              onClick={() => setEditingTopic(t)}
+                              className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-400 hover:text-blue-600"
+                              title="Edit notes"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => setDeleteTarget({ type: 'topic', id: t.id, name: t.name })} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))
@@ -130,8 +149,9 @@ export default function Topics() {
       )}
 
       {showAddSubject && <AddSubjectModal onClose={() => setShowAddSubject(false)} onAdd={addSubject} />}
-      {addTopicFor && <AddTopicModal onClose={() => setAddTopicFor(null)} onAdd={(name) => addTopic(addTopicFor, name)} />}
+      {addTopicFor && <AddTopicModal onClose={() => setAddTopicFor(null)} onAdd={(name, desc) => addTopic(addTopicFor, name, desc)} />}
       {deleteTarget && <ConfirmDeleteModal target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={doDelete} />}
+      {editingTopic && <EditNotesModal topic={editingTopic} onClose={() => setEditingTopic(null)} onSave={(desc) => updateTopicDescription(editingTopic.id, desc)} />}
     </div>
   );
 }
@@ -162,6 +182,7 @@ function AddSubjectModal({ onClose, onAdd }) {
 
 function AddTopicModal({ onClose, onAdd }) {
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   return (
     <Modal onClose={onClose} title="Add topic">
       <div className="space-y-4">
@@ -169,7 +190,29 @@ function AddTopicModal({ onClose, onAdd }) {
           <label className="label">Topic name</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </div>
-        <button onClick={() => name && onAdd(name)} className="btn-primary w-full" disabled={!name}>Add</button>
+        <div>
+          <label className="label">Notes / key concepts (optional)</label>
+          <textarea className="input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Big-O notation, merge sort vs quick sort..." />
+        </div>
+        <button onClick={() => name && onAdd(name, description)} className="btn-primary w-full" disabled={!name}>Add</button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditNotesModal({ topic, onClose, onSave }) {
+  const [description, setDescription] = useState(topic.description || '');
+  return (
+    <Modal onClose={onClose} title={`Notes — ${topic.name}`}>
+      <div className="space-y-4">
+        <div>
+          <label className="label">Key concepts, formulas, or reminders</label>
+          <textarea className="input" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What should you remember when reviewing this topic?" autoFocus />
+        </div>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+          <button onClick={() => onSave(description)} className="btn-primary flex-1">Save</button>
+        </div>
       </div>
     </Modal>
   );

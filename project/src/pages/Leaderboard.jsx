@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabase.js';
 import { startOfWeek, endOfWeek } from '../lib/dates.js';
-import { Trophy, Flame, Clock } from 'lucide-react';
+import { Trophy, Flame, Clock, Brain } from 'lucide-react';
 
 export default function Leaderboard() {
   const { user } = useAuth();
@@ -12,6 +12,7 @@ export default function Leaderboard() {
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
       const { data: optIns } = await supabase
         .from('leaderboard_opt_ins')
         .select('user_id, alias, profiles(display_name, streak_count)')
@@ -46,7 +47,8 @@ export default function Leaderboard() {
           }))
           .sort((a, b) => b.score - a.score);
         setEntries(ranked);
-      } else {
+
+      } else if (tab === 'streak') {
         const ranked = optIns
           .map((o) => ({
             userId: o.user_id,
@@ -56,11 +58,50 @@ export default function Leaderboard() {
           }))
           .sort((a, b) => b.score - a.score);
         setEntries(ranked);
+
+      } else if (tab === 'mastery') {
+        // Average mastery across all topics per user
+        const userIds = optIns.map((o) => o.user_id);
+        const { data: topicsData } = await supabase
+          .from('topics')
+          .select('user_id, current_mastery')
+          .in('user_id', userIds);
+
+        const masteryMap = {};
+        const countMap = {};
+        (topicsData || []).forEach((t) => {
+          masteryMap[t.user_id] = (masteryMap[t.user_id] || 0) + (t.current_mastery || 0);
+          countMap[t.user_id] = (countMap[t.user_id] || 0) + 1;
+        });
+
+        const ranked = optIns
+          .map((o) => ({
+            userId: o.user_id,
+            name: o.alias || o.profiles?.display_name || 'Anonymous',
+            score: countMap[o.user_id] ? Math.round(masteryMap[o.user_id] / countMap[o.user_id]) : 0,
+            topicCount: countMap[o.user_id] || 0,
+            isMe: o.user_id === user?.id,
+          }))
+          .sort((a, b) => b.score - a.score);
+        setEntries(ranked);
       }
+
       setLoading(false);
     }
     load();
   }, [tab, user]);
+
+  const tabs = [
+    { id: 'hours', label: 'Weekly Hours', icon: Clock },
+    { id: 'streak', label: 'Streak', icon: Flame },
+    { id: 'mastery', label: 'Avg Mastery', icon: Brain },
+  ];
+
+  function formatScore(e) {
+    if (tab === 'hours') return `${e.score.toFixed(1)}h`;
+    if (tab === 'streak') return `${e.score} days`;
+    return `${e.score}%${e.topicCount ? ` (${e.topicCount} topics)` : ''}`;
+  }
 
   return (
     <div className="space-y-6">
@@ -68,19 +109,16 @@ export default function Leaderboard() {
         <h1 className="text-2xl font-bold">Leaderboard</h1>
       </div>
 
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
-        <button
-          onClick={() => setTab('hours')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'hours' ? 'bg-white dark:bg-gray-900 shadow-sm' : 'text-gray-500'}`}
-        >
-          <Clock className="w-4 h-4" /> Weekly Hours
-        </button>
-        <button
-          onClick={() => setTab('streak')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'streak' ? 'bg-white dark:bg-gray-900 shadow-sm' : 'text-gray-500'}`}
-        >
-          <Flame className="w-4 h-4" /> Current Streak
-        </button>
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit flex-wrap">
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === id ? 'bg-white dark:bg-gray-900 shadow-sm' : 'text-gray-500'}`}
+          >
+            <Icon className="w-4 h-4" /> {label}
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -95,7 +133,9 @@ export default function Leaderboard() {
           <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-800 text-xs font-medium text-gray-400 uppercase">
             <div className="col-span-1">Rank</div>
             <div className="col-span-7">Name</div>
-            <div className="col-span-4 text-right">{tab === 'hours' ? 'Hours' : 'Streak'}</div>
+            <div className="col-span-4 text-right">
+              {tab === 'hours' ? 'Hours' : tab === 'streak' ? 'Streak' : 'Avg Mastery'}
+            </div>
           </div>
           {entries.map((e, i) => (
             <div
@@ -113,8 +153,8 @@ export default function Leaderboard() {
                 {e.name}
                 {e.isMe && <span className="ml-2 text-xs text-brand-600 dark:text-brand-400 font-medium">(you)</span>}
               </div>
-              <div className="col-span-4 text-right font-semibold">
-                {tab === 'hours' ? `${e.score.toFixed(1)}h` : `${e.score} days`}
+              <div className="col-span-4 text-right font-semibold text-sm">
+                {formatScore(e)}
               </div>
             </div>
           ))}
