@@ -1,5 +1,6 @@
 import { supabase } from '../supabase.js';
 import { computeSM2 } from './sm2.js';
+import { scheduleFSRS } from './fsrs.js';
 import { todayLocalISO, localDateKey } from './dates.js';
 
 export async function submitStudyEvent({
@@ -34,63 +35,106 @@ export async function submitStudyEvent({
     .single();
   if (eventError) throw eventError;
 
+  // Check per-user FSRS opt-in flag
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('use_fsrs')
+    .eq('id', userId)
+    .single();
+  const useFSRS = profile?.use_fsrs === true;
+
   const { data: state } = await supabase
     .from('review_states')
     .select('*')
     .eq('topic_id', topicId)
     .maybeSingle();
 
-  const currentState = state || {
-    ease_factor: 2.5,
-    interval_days: 0,
-    repetitions: 0,
-  };
+  let masteryScore;
 
-  const result = computeSM2(
-    {
-      easeFactor: parseFloat(currentState.ease_factor),
-      intervalDays: currentState.interval_days,
-      repetitions: currentState.repetitions,
-    },
-    confidenceRating
-  );
+  if (useFSRS) {
+    const fsrsResult = scheduleFSRS(state ?? {}, confidenceRating);
+    masteryScore = fsrsResult.masteryScore;
 
-  if (state) {
-    const { error: updateError } = await supabase
-      .from('review_states')
-      .update({
-        ease_factor: result.easeFactor,
-        interval_days: result.intervalDays,
-        repetitions: result.repetitions,
-        next_review_date: result.nextReviewDate,
-        last_review_date: todayLocalISO(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('topic_id', topicId);
-    if (updateError) throw updateError;
+    const fsrsRow = {
+      stability: fsrsResult.stability,
+      fsrs_difficulty: fsrsResult.fsrs_difficulty,
+      reps: fsrsResult.reps,
+      lapses: fsrsResult.lapses,
+      fsrs_state: fsrsResult.fsrs_state,
+      last_reviewed_at: fsrsResult.last_reviewed_at,
+      next_review_date: fsrsResult.nextReviewDate,
+      last_review_date: todayLocalISO(),
+      interval_days: fsrsResult.intervalDays,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (state) {
+      const { error } = await supabase
+        .from('review_states')
+        .update(fsrsRow)
+        .eq('topic_id', topicId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('review_states')
+        .insert({ topic_id: topicId, ...fsrsRow });
+      if (error) throw error;
+    }
   } else {
-    const { error: insertError } = await supabase
-      .from('review_states')
-      .insert({
-        topic_id: topicId,
-        ease_factor: result.easeFactor,
-        interval_days: result.intervalDays,
-        repetitions: result.repetitions,
-        next_review_date: result.nextReviewDate,
-        last_review_date: todayLocalISO(),
-      });
-    if (insertError) throw insertError;
+    // SM2 path (default for all users)
+    const currentState = state || {
+      ease_factor: 2.5,
+      interval_days: 0,
+      repetitions: 0,
+    };
+
+    const result = computeSM2(
+      {
+        easeFactor: parseFloat(currentState.ease_factor),
+        intervalDays: currentState.interval_days,
+        repetitions: currentState.repetitions,
+      },
+      confidenceRating
+    );
+    masteryScore = result.masteryScore;
+
+    if (state) {
+      const { error: updateError } = await supabase
+        .from('review_states')
+        .update({
+          ease_factor: result.easeFactor,
+          interval_days: result.intervalDays,
+          repetitions: result.repetitions,
+          next_review_date: result.nextReviewDate,
+          last_review_date: todayLocalISO(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('topic_id', topicId);
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabase
+        .from('review_states')
+        .insert({
+          topic_id: topicId,
+          ease_factor: result.easeFactor,
+          interval_days: result.intervalDays,
+          repetitions: result.repetitions,
+          next_review_date: result.nextReviewDate,
+          last_review_date: todayLocalISO(),
+        });
+      if (insertError) throw insertError;
+    }
   }
 
   const { error: topicError } = await supabase
     .from('topics')
-    .update({ current_mastery: result.masteryScore })
+    .update({ current_mastery: masteryScore })
     .eq('id', topicId);
   if (topicError) throw topicError;
 
   await updateStreak(userId);
 
-  return { event, masteryScore: result.masteryScore };
+  return { event, masteryScore };
 }
 
 async function updateStreak(userId) {
