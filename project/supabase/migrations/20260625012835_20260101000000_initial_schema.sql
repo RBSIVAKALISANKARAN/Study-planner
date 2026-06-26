@@ -130,3 +130,148 @@ create policy "Owner manage own"
   on public.leaderboard_opt_ins for all using (auth.uid() = user_id);
 create policy "Public read visible"
   on public.leaderboard_opt_ins for select using (is_visible = true);
+
+ALTER TABLE topics ADD COLUMN IF NOT EXISTS description text;
+
+-- ─── EXTEND EXISTING TABLES ───────────────────────────────────────
+
+-- topics
+ALTER TABLE public.topics ADD COLUMN IF NOT EXISTS position integer DEFAULT 0;
+ALTER TABLE public.topics ADD COLUMN IF NOT EXISTS difficulty integer DEFAULT 3 CHECK (difficulty BETWEEN 1 AND 5);
+ALTER TABLE public.topics ADD COLUMN IF NOT EXISTS estimated_hours numeric(5,2);
+
+-- review_states (FSRS columns — existing SM2 columns untouched)
+ALTER TABLE public.review_states ADD COLUMN IF NOT EXISTS stability numeric(6,2) DEFAULT 0;
+ALTER TABLE public.review_states ADD COLUMN IF NOT EXISTS fsrs_difficulty numeric(4,2) DEFAULT 0;
+ALTER TABLE public.review_states ADD COLUMN IF NOT EXISTS reps integer DEFAULT 0;
+ALTER TABLE public.review_states ADD COLUMN IF NOT EXISTS lapses integer DEFAULT 0;
+ALTER TABLE public.review_states ADD COLUMN IF NOT EXISTS fsrs_state integer DEFAULT 0;
+ALTER TABLE public.review_states ADD COLUMN IF NOT EXISTS last_reviewed_at timestamptz;
+
+-- profiles
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS use_fsrs boolean DEFAULT false;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS plan_streak integer DEFAULT 0;
+
+-- study_events: add mastery snapshot column
+ALTER TABLE public.study_events ADD COLUMN IF NOT EXISTS mastery_after numeric(4,2);
+
+-- study_events: update event_type constraint to allow 'feynman'
+ALTER TABLE public.study_events DROP CONSTRAINT IF EXISTS study_events_event_type_check;
+ALTER TABLE public.study_events ADD CONSTRAINT study_events_event_type_check
+  CHECK (event_type IN ('timer', 'quick', 'pomodoro', 'feynman'));
+
+
+-- ─── NEW TABLES ───────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.daily_plans (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE DEFAULT auth.uid(),
+  date            date NOT NULL,
+  planned_tasks   jsonb DEFAULT '[]',
+  completed_tasks jsonb DEFAULT '[]',
+  completed       boolean DEFAULT false,
+  created_at      timestamptz DEFAULT now(),
+  UNIQUE (user_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_plans_user_date ON public.daily_plans(user_id, date);
+
+CREATE TABLE IF NOT EXISTS public.topic_relationships (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_topic_id   uuid NOT NULL REFERENCES public.topics(id) ON DELETE CASCADE,
+  child_topic_id    uuid NOT NULL REFERENCES public.topics(id) ON DELETE CASCADE,
+  relationship_type text DEFAULT 'prerequisite'
+                      CHECK (relationship_type IN ('prerequisite', 'subtopic', 'related')),
+  created_at        timestamptz DEFAULT now(),
+  UNIQUE (parent_topic_id, child_topic_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.questions (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  topic_id      uuid NOT NULL REFERENCES public.topics(id) ON DELETE CASCADE,
+  type          text CHECK (type IN ('compare', 'apply', 'evaluate', 'analyze', 'create')),
+  question_text text NOT NULL,
+  model_answer  text,
+  difficulty    integer CHECK (difficulty BETWEEN 1 AND 5),
+  created_at    timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_questions_topic ON public.questions(topic_id);
+
+CREATE TABLE IF NOT EXISTS public.resources (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  topic_id     uuid NOT NULL REFERENCES public.topics(id) ON DELETE CASCADE,
+  type         text CHECK (type IN ('video', 'article', 'pdf', 'book', 'course')),
+  url          text,
+  title        text NOT NULL,
+  completed    boolean DEFAULT false,
+  notes        text,
+  storage_path text,
+  created_at   timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_resources_topic ON public.resources(topic_id);
+
+CREATE TABLE IF NOT EXISTS public.syllabus_uploads (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE DEFAULT auth.uid(),
+  original_filename text,
+  storage_path      text,
+  parsed_topics     jsonb,
+  status            text DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  created_at        timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_syllabus_uploads_user ON public.syllabus_uploads(user_id);
+
+CREATE TABLE IF NOT EXISTS public.achievements (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  type       text NOT NULL,
+  awarded_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, type)
+);
+CREATE INDEX IF NOT EXISTS idx_achievements_user ON public.achievements(user_id);
+
+
+-- ─── RLS FOR NEW TABLES ───────────────────────────────────────────
+
+ALTER TABLE public.daily_plans ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner CRUD" ON public.daily_plans
+  FOR ALL USING (auth.uid() = user_id);
+
+ALTER TABLE public.topic_relationships ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner CRUD" ON public.topic_relationships
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM public.topics
+      WHERE topics.id = topic_relationships.parent_topic_id
+      AND topics.user_id = auth.uid()
+    )
+  );
+
+ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner CRUD" ON public.questions
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM public.topics
+      WHERE topics.id = questions.topic_id
+      AND topics.user_id = auth.uid()
+    )
+  );
+
+ALTER TABLE public.resources ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner CRUD" ON public.resources
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM public.topics
+      WHERE topics.id = resources.topic_id
+      AND topics.user_id = auth.uid()
+    )
+  );
+
+ALTER TABLE public.syllabus_uploads ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner CRUD" ON public.syllabus_uploads
+  FOR ALL USING (auth.uid() = user_id);
+
+ALTER TABLE public.achievements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner select" ON public.achievements
+  FOR SELECT USING (auth.uid() = user_id);
+-- INSERT is service role only (service role bypasses RLS automatically)
