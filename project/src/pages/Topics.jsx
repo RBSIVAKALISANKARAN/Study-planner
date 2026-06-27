@@ -3,7 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabase.js';
 import { MasteryBadge } from '../lib/mastery.jsx';
 import { formatLocalDate } from '../lib/dates.js';
-import { Plus, ChevronDown, ChevronRight, Trash2, X, FileText } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Trash2, X, FileText, BookOpen } from 'lucide-react';
+import SyllabusUploadModal from '../components/SyllabusUploadModal.jsx';
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
 
@@ -17,6 +18,7 @@ export default function Topics() {
   const [addTopicFor, setAddTopicFor] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editingTopic, setEditingTopic] = useState(null);
+  const [showSyllabusModal, setShowSyllabusModal] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -77,9 +79,19 @@ export default function Topics() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Topics</h1>
-        <button onClick={() => setShowAddSubject(true)} className="btn-primary">
-          <Plus className="w-4 h-4" /> Add subject
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowSyllabusModal(true)}
+            className="btn-secondary"
+            disabled={subjects.length === 0}
+            title={subjects.length === 0 ? 'Add a subject first' : 'Import syllabus with AI'}
+          >
+            <BookOpen className="w-4 h-4" /> Import Syllabus
+          </button>
+          <button onClick={() => setShowAddSubject(true)} className="btn-primary">
+            <Plus className="w-4 h-4" /> Add subject
+          </button>
+        </div>
       </div>
 
       {subjects.length === 0 ? (
@@ -149,6 +161,13 @@ export default function Topics() {
       )}
 
       {showAddSubject && <AddSubjectModal onClose={() => setShowAddSubject(false)} onAdd={addSubject} />}
+      {showSyllabusModal && (
+        <SyllabusUploadModal
+          subjects={subjects}
+          onClose={() => setShowSyllabusModal(false)}
+          onSuccess={load}
+        />
+      )}
       {addTopicFor && <AddTopicModal onClose={() => setAddTopicFor(null)} onAdd={(name, desc) => addTopic(addTopicFor, name, desc)} />}
       {deleteTarget && <ConfirmDeleteModal target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={doDelete} />}
       {editingTopic && <EditNotesModal topic={editingTopic} onClose={() => setEditingTopic(null)} onSave={(desc) => updateTopicDescription(editingTopic.id, desc)} />}
